@@ -14,6 +14,7 @@
 #include <grp.h>
 #include <time.h>
 #include <pwd.h>
+#include "chmod.h"
 #define PROC_FS "/proc"
 
 struct dirent *entry;
@@ -29,6 +30,38 @@ int shell_active = 1; // требуется для команды exit
 
 // Встроенные команды
 // - pwd, exit
+
+// environment variables
+char* paste_env(char *str)
+{
+    char *env;
+    char buf[256];
+    regex_t preg;
+    regmatch_t pm;
+    char *newstr;
+    int len;
+
+    regcomp( &preg, "\\$\\w\\+\\b", REG_ICASE );
+    while ( regexec(&preg, str, 1, &pm, REG_NOTBOL) == 0 )
+    {
+	memset(buf, '\0', 256);
+	strncpy(buf,&str[pm.rm_so]+1,(pm.rm_eo-pm.rm_so-1 < 256)?pm.rm_eo-pm.rm_so-1:254);
+	env = getenv(buf);
+	if(!env) env = "";
+	len = strlen(str)-strlen(buf)+strlen(env);
+	newstr=malloc(len);
+	memset(newstr, '\0', len);
+	strncpy(newstr,str,pm.rm_so);
+	strncat(newstr,env,strlen(env));
+	strncat(newstr,&str[pm.rm_eo],strlen(str)-pm.rm_eo);
+	str = newstr;
+    }
+    regfree(&preg);
+
+    return newstr;
+}
+
+
 struct ls_struct
 {
     int l;
@@ -423,6 +456,15 @@ SHCMD(exit)
 	return 0;
 }
 
+SHCMD (echo) {
+    int i = 1;
+    while (params[i] != NULL) {
+        printf("%s", params[i]);
+        i++;
+    }
+	printf("\n");
+}
+
 
 // выполнение команды с параметрами
 void my_exec(char *cmd)
@@ -458,6 +500,12 @@ void my_exec(char *cmd)
 	else
 	if (IS_CMD(wc))
 		SHCMD_EXEC(wc);
+	else
+    if (IS_CMD(chmod))
+		SHCMD_EXEC(chmod);
+	else
+    if (IS_CMD(echo))
+		SHCMD_EXEC(echo);
 	else
 	{ // иначе вызов внешней команды
 		execvp(params[0], params);
@@ -541,6 +589,7 @@ int main()
 		printf("[%s]# ",getenv("PWD"));
 		fflush(stdout);
 		fgets(cmdline,1024,stdin);
+		paste_env(cmdline);
 		if( (p = strstr(cmdline,"\n")) != NULL ) p[0] = 0;
 
 		token = strtok(cmdline, "|");
